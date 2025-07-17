@@ -18,11 +18,6 @@ Ygg requires a GitHub PAT to authenticate API requests. Set it as an environment
    - `read:org`: Read org and team membership, read org projects.
 3. If your organization uses SSO (SAML single sign-on), enable SSO for the token and authorize it for your organization(s).
 
-### Installation
-```sh
-cargo install ygg
-```
-
 ### Usage
 Search for a package version across repos:
 ```sh
