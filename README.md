@@ -9,7 +9,7 @@
 - Caches results for efficiency.
 
 ### GitHub Personal Access Token (GHP_TOKEN)
-Ygg requires a GitHub PAT to authenticate API requests. Set it as an environment variable: `export GHP_TOKEN=your_token_here`.
+**ygg** requires a GitHub PAT to authenticate API requests. Set it as an environment variable: `export GHP_TOKEN=your_token_here`.
 
 #### Creating the Token
 1. Go to [https://github.com/settings/tokens](https://github.com/settings/tokens) and generate a new classic token.
