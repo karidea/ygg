@@ -378,34 +378,14 @@ fn process_string_search(file_str: &str, query: &str) -> String {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let is_package_lock = cli.filename.is_none();
-
-    if is_package_lock {
-        if cli.package.is_none() {
-            eprintln!("--package required for package-lock mode");
-            std::process::exit(1);
-        }
-    } else if cli.search.is_none() {
-        eprintln!("--search required for string search mode");
-        std::process::exit(1);
-    }
-
-    let query = if is_package_lock {
-        cli.package.as_ref().unwrap().clone()
-    } else {
-        cli.search.as_ref().unwrap().clone()
-    };
-
     let mut org = cli.org.clone().unwrap_or_default();
     if cli.org.is_none() {
         org = load_or_prompt_org()?;
     }
 
-    let filename = cli.filename.clone().unwrap_or_else(|| "package-lock.json".to_string());
-
     let gh_client = GitHubClient::new()?;
 
-    let json: Vec<String> = if let Some(search_query) = &cli.query {
+    let mut json: Vec<String> = if let Some(search_query) = &cli.query {
         // Perform dynamic repo search if --query is provided
         let repos = search_repos(&gh_client, search_query, &org).await?;
         // Write the repos to repos.json, overwriting if exists
@@ -418,6 +398,31 @@ async fn main() -> Result<()> {
         let data = fs::read_to_string(repos_path)?;
         serde_json::from_str(&data)?
     };
+
+    // Sort the repos for consistent output
+    json.sort();
+
+    // Determine mode
+    let is_package_lock = cli.filename.is_none();
+    let is_valid_package_mode = is_package_lock && cli.package.is_some();
+    let is_valid_search_mode = !is_package_lock && cli.search.is_some();
+
+    if !is_valid_package_mode && !is_valid_search_mode {
+        // No valid search/audit mode specified: List repos and exit
+        for repo in json {
+            println!("{repo}");
+        }
+        return Ok(());
+    }
+
+    // Proceed with file search/processing
+    let query = if is_package_lock {
+        cli.package.as_ref().unwrap().clone()
+    } else {
+        cli.search.as_ref().unwrap().clone()
+    };
+
+    let filename = cli.filename.clone().unwrap_or_else(|| "package-lock.json".to_string());
 
     let uris: Vec<_> = json.iter().map(|repo| {
         format!("https://api.github.com/repos/{repo}/contents/{filename}")
