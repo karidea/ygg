@@ -29,9 +29,4 @@ Grep a string in a custom file:
 ygg --filename "config.yaml" --search "enable-feature: true" --repos "repos.json"
 ```
 
-Force refresh cache:
-```sh
-ygg --package "react" --force-fetch
-```
-
 For full options: `ygg --help`.
