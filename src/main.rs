@@ -173,35 +173,52 @@ impl CacheManager {
     }
 }
 
-/// Ygg (Yggdrasil GitHub Grep): Grep GitHub repos to audit NPM lockfile versions or search custom strings in files
+/// ygg (Yggdrasil GitHub Grep): Grep GitHub repos to audit NPM package versions or search strings in specified files
 #[derive(Parser, Debug, Clone)]
 #[clap(version, about, long_about = None)]
 struct Cli {
-    /// Path of the file containing json list of repositories (required unless --query is provided)
+    /// Path to a JSON file containing a list of repositories (e.g., ["org/repo1", "org/repo2"]).
+    ///
+    /// Defaults to "repos.json". Used unless --query is provided for dynamic search.
     #[clap(short, long, default_value = "repos.json")]
     repos: String,
 
-    /// Search query for GitHub code search (if provided, searches for repos dynamically instead of using --repos)
+    /// GitHub code search query to dynamically discover repositories (e.g., "language:javascript path:package.json").
+    ///
+    /// If provided, searches repositories via API and overrides --repos. Combine with --org for organization scoping.
+    /// Results are saved to "repos.json" for future use.
     #[clap(short, long)]
     query: Option<String>,
 
-    /// Organization name for code search (used with --query)
+    /// GitHub organization to scope the search (e.g., "myorg").
+    ///
+    /// Used with --query to limit results (appends "org:myorg" to the query). If omitted and no .ygg.toml exists,
     #[clap(short, long)]
     org: Option<String>,
 
-    /// Package name to check versions on (required for package-lock mode)
+    /// NPM package name to audit versions for in package-lock.json files (e.g., "lodash").
+    ///
+    /// Enables package audit mode. Outputs sorted versions and repositories where found.
     #[clap(short, long)]
     package: Option<String>,
 
-    /// Optional filename to fetch and search inside (if provided, performs string search instead of package-lock parsing)
+    /// Filename to fetch from each repository (e.g., "config.yaml").
+    ///
+    /// Enables string search mode when combined with --search. Defaults to "package-lock.json" if omitted.
+    /// Switches from package audit to searching for --search string in the file content.
     #[clap(short, long)]
     filename: Option<String>,
 
-    /// Search string to find in the file content (required for string search mode)
+    /// String to search for within the fetched file content (e.g., "secret_key").
+    ///
+    /// Required for string search mode. Outputs repositories where the string is found.
+    /// Use with --filename for custom files.
     #[clap(short = 's', long)]
     search: Option<String>,
 
-    /// Clear cache to force fetch from GitHub
+    /// Clear the local cache before fetching files from GitHub.
+    ///
+    /// Forces fresh downloads, ignoring cached content. Useful for ensuring up-to-date results.
     #[clap(short = 'c', long)]
     clear_cache: bool,
 }

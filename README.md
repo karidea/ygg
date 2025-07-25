@@ -2,11 +2,17 @@
 
 **ygg** is a fast, concurrent Rust CLI tool for searching and grepping package versions or strings across GitHub repositories. It dynamically queries GitHub's API or uses repo lists to fetch and analyze files (e.g., package-lock.json) in parallel.
 
-## Features
-- Audit versions of a specific NPM package across repos.
-- Search for strings in specified files across repos.
-- Supports dynamic repo discovery via GitHub code search or static repo lists.
-- Caches results for efficiency.
+Use ygg to:
+- Dynamically search for repositories using GitHub's code search API (--query).
+- Audit NPM package versions in package-lock.json files (--package).
+- Search for custom strings in specified files (--filename and --search).
+
+Modes:
+- Package audit mode: Use --package to check versions in package-lock.json (default file).
+- String search mode: Use --filename and --search to find strings in custom files.
+- Repo listing: If no mode is specified, lists repositories from --repos or --query.
+
+Requires GHP_TOKEN environment variable for GitHub authentication.
 
 ### GitHub Personal Access Token (GHP_TOKEN)
 **ygg** requires a GitHub PAT to authenticate API requests. Set it as an environment variable: `export GHP_TOKEN=your_token_here`.
@@ -33,18 +39,18 @@ Full options:
 
 ```sh
 ❯ ygg -h
-Ygg (Yggdrasil GitHub Grep): Grep GitHub repos to audit NPM lockfile versions or search custom strings in files
+ygg (Yggdrasil GitHub Grep): Grep GitHub repos to audit NPM package versions or search strings in specified files
 
 Usage: ygg [OPTIONS]
 
 Options:
-  -r, --repos <REPOS>        Path of the file containing json list of repositories (required unless --query is provided) [default: repos.json]
-  -q, --query <QUERY>        Search query for GitHub code search (if provided, searches for repos dynamically instead of using --repos)
-  -o, --org <ORG>            Organization name for code search (used with --query)
-  -p, --package <PACKAGE>    Package name to check versions on (required for package-lock mode)
-  -f, --filename <FILENAME>  Optional filename to fetch and search inside (if provided, performs string search instead of package-lock parsing)
-  -s, --search <SEARCH>      Search string to find in the file content (required for string search mode)
-  -c, --clear-cache          Clear cache to force fetch from GitHub
-  -h, --help                 Print help
+  -r, --repos <REPOS>        Path to a JSON file containing a list of repositories (e.g., ["org/repo1", "org/repo2"]) [default: repos.json]
+  -q, --query <QUERY>        GitHub code search query to dynamically discover repositories (e.g., "language:javascript path:package.json")
+  -o, --org <ORG>            GitHub organization to scope the search (e.g., "myorg")
+  -p, --package <PACKAGE>    NPM package name to audit versions for in package-lock.json files (e.g., "lodash")
+  -f, --filename <FILENAME>  Filename to fetch from each repository (e.g., "config.yaml")
+  -s, --search <SEARCH>      String to search for within the fetched file content (e.g., "secret_key")
+  -c, --clear-cache          Clear the local cache before fetching files from GitHub
+  -h, --help                 Print help (see more with '--help')
   -V, --version              Print version
 ```
