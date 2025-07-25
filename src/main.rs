@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use std::str;
 use url::form_urlencoded;
 use thiserror::Error;
+use indicatif::{ProgressBar, ProgressStyle};
 
 #[derive(Deserialize, Serialize, Debug)]
 struct Config {
@@ -427,6 +428,18 @@ async fn main() -> Result<()> {
         format!("https://api.github.com/repos/{repo}/contents/{filename}")
     }).collect();
 
+    if uris.is_empty() {
+         println!("No repositories found.");
+         return Ok(());
+     }
+
+     let pb = ProgressBar::new(uris.len() as u64);
+     pb.set_style(ProgressStyle::default_bar()
+         .template("{msg} [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+         .unwrap()
+         .progress_chars("##-"));
+     pb.set_message("Fetching files");
+
     let cache_dir = PathBuf::from("./.cache");
 
     if cli.clear_cache {
@@ -441,8 +454,10 @@ async fn main() -> Result<()> {
         .map(|uri| {
             let gh_client = gh_client.clone();
             let cache_manager = cache_manager.clone();
+            let pb = pb.clone();
             async move {
                 let body_bytes = gh_client.fetch_raw_file(&uri, &cache_manager).await?;
+                pb.inc(1);
                 Ok(body_bytes)
             }
         })
@@ -464,6 +479,8 @@ async fn main() -> Result<()> {
         });
 
     let versions: Vec<Result<String>> = version_results.collect().await;
+
+    pb.finish_with_message("Fetching complete");
 
     let mut found_items: Vec<(String, String)> = versions.iter().enumerate()
         .filter_map(|(i, version): (usize, &Result<String>)| {
