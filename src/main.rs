@@ -40,6 +40,7 @@ struct PackageLockJson {
 
 #[derive(Deserialize)]
 struct ApiResponse {
+    total_count: u32,
     items: Vec<Item>,
 }
 
@@ -244,8 +245,70 @@ async fn search_repos(gh_client: &GitHubClient, query: &str, org: &str) -> Resul
     // Collect unique repository full names
     let mut unique_repos: HashSet<String> = HashSet::new();
 
-    loop {
-        let mut req_builder = gh_client.client.request(Method::GET, &current_url);
+    let pb = ProgressBar::new(1);
+    pb.set_style(ProgressStyle::default_bar()
+        .template("{msg} [{bar:40.cyan/blue}] {pos}/{len} (search pages)")
+        .unwrap()
+        .progress_chars("##-"));
+    pb.set_message("Fetching repository search pages");
+
+    // Fetch first page
+    let mut req_builder = gh_client.client.request(Method::GET, current_url.clone());
+    req_builder = req_builder.header("Authorization", format!("token {}", gh_client.token));
+    req_builder = req_builder.header("User-Agent", "ygg/0.1");
+    req_builder = req_builder.header("Accept", "application/vnd.github.v3+json");
+    req_builder = req_builder.header("X-GitHub-Api-Version", "2022-11-28");
+
+    let resp = req_builder.send().await?;
+
+    if !resp.status().is_success() {
+        return Err(YggError::ApiError(format!("API error: {}", resp.status())));
+    }
+
+    // Extract next URL from Link header before consuming the response
+    let mut next_url: Option<String> = None;
+    if let Some(link_header) = resp.headers().get(header::LINK) {
+        if let Ok(link_str) = link_header.to_str() {
+            let links: Vec<&str> = link_str.split(',').collect();
+            for link in links.iter().map(|l| l.trim()) {
+                if link.contains(r#"rel="next""#) {
+                    let start = link.find('<').map_or(0, |i| i + 1);
+                    let end = link.find('>');
+                    if let Some(e) = end {
+                        next_url = Some(link[start..e].to_string());
+                       break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Now consume the response to get the body
+    let api_resp: ApiResponse = resp.json().await?;
+
+    // Update progress bar length based on total_count
+    let per_page = 100u64;
+    let max_pages = 10u64; // GitHub limits search to 1000 results (10 pages)
+    let total_count = api_resp.total_count as u64;
+    let estimated_pages = if total_count == 0 {
+        1
+    } else {
+        ((total_count as f64 / per_page as f64).ceil() as u64).min(max_pages)
+    };
+    pb.set_length(estimated_pages);
+
+    // Process first page items
+    for item in api_resp.items {
+        unique_repos.insert(item.repository.full_name);
+    }
+
+    pb.inc(1);
+
+    // Fetch remaining pages
+    while let Some(url) = next_url {
+        current_url = url;
+
+        let mut req_builder = gh_client.client.request(Method::GET, current_url.clone());
         req_builder = req_builder.header("Authorization", format!("token {}", gh_client.token));
         req_builder = req_builder.header("User-Agent", "ygg/0.1");
         req_builder = req_builder.header("Accept", "application/vnd.github.v3+json");
@@ -257,8 +320,8 @@ async fn search_repos(gh_client: &GitHubClient, query: &str, org: &str) -> Resul
             return Err(YggError::ApiError(format!("API error: {}", resp.status())));
         }
 
-        // Extract next URL from Link header before consuming the response
-        let mut next_url: Option<String> = None;
+        // Extract next URL
+        next_url = None;
         if let Some(link_header) = resp.headers().get(header::LINK) {
             if let Ok(link_str) = link_header.to_str() {
                 let links: Vec<&str> = link_str.split(',').collect();
@@ -275,19 +338,17 @@ async fn search_repos(gh_client: &GitHubClient, query: &str, org: &str) -> Resul
             }
         }
 
-        // Now consume the response to get the body
+        // Get body
         let api_resp: ApiResponse = resp.json().await?;
 
         for item in api_resp.items {
             unique_repos.insert(item.repository.full_name);
         }
 
-        if let Some(url) = next_url {
-            current_url = url;
-        } else {
-            break;
-        }
+        pb.inc(1);
     }
+
+    pb.finish_with_message("Repository search complete");
 
     let mut repos_vec: Vec<String> = unique_repos.into_iter().collect();
     repos_vec.sort();
@@ -435,7 +496,7 @@ async fn main() -> Result<()> {
 
      let pb = ProgressBar::new(uris.len() as u64);
      pb.set_style(ProgressStyle::default_bar()
-         .template("{msg} [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+         .template("{msg} [{bar:40.cyan/blue}] {pos}/{len} (repos)")
          .unwrap()
          .progress_chars("##-"));
      pb.set_message("Fetching files");
