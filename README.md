@@ -29,4 +29,22 @@ Grep a string in a custom file:
 ygg --filename "config.yaml" --search "enable-feature: true" --repos "repos.json"
 ```
 
-For full options: `ygg --help`.
+Full options:
+
+```sh
+❯ ygg -h
+Ygg (Yggdrasil GitHub Grep): Grep GitHub repos to audit NPM lockfile versions or search custom strings in files
+
+Usage: ygg [OPTIONS]
+
+Options:
+  -r, --repos <REPOS>        Path of the file containing json list of repositories (required unless --query is provided) [default: repos.json]
+  -q, --query <QUERY>        Search query for GitHub code search (if provided, searches for repos dynamically instead of using --repos)
+  -o, --org <ORG>            Organization name for code search (used with --query)
+  -p, --package <PACKAGE>    Package name to check versions on (required for package-lock mode)
+  -f, --filename <FILENAME>  Optional filename to fetch and search inside (if provided, performs string search instead of package-lock parsing)
+  -s, --search <SEARCH>      Search string to find in the file content (required for string search mode)
+  -c, --clear-cache          Clear cache to force fetch from GitHub
+  -h, --help                 Print help
+  -V, --version              Print version
+```
