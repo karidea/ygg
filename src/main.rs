@@ -3,15 +3,13 @@
 
 use clap::Parser;
 use futures::prelude::*;
-use hyper::client::HttpConnector;
-use hyper::{body, Body, Client, Method, Request, StatusCode, header};
-use hyper_tls::HttpsConnector;
+use reqwest::{header, Client, Method, StatusCode};
 use semver::Version;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::PathBuf;
 use std::str;
 use url::form_urlencoded;
@@ -60,8 +58,8 @@ enum YggError {
     ApiError(String),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Hyper error: {0}")]
-    Hyper(#[from] hyper::Error),
+    #[error("Reqwest error: {0}")]
+    Reqwest(#[from] reqwest::Error),
     #[error("UTF-8 error: {0}")]
     Utf8(#[from] std::str::Utf8Error),
     #[error("JSON error: {0}")]
@@ -82,32 +80,18 @@ type Result<T> = std::result::Result<T, YggError>;
 
 #[derive(Clone)]
 struct GitHubClient {
-    client: Client<HttpsConnector<HttpConnector>>,
+    client: Client,
     token: String,
 }
 
 impl GitHubClient {
     fn new() -> Result<Self> {
         let token = env::var("GHP_TOKEN")?;
-        let https = HttpsConnector::new();
-        let client = Client::builder().http2_only(true).build::<_, Body>(https);
+        let client = Client::builder()
+            .user_agent("ygg/0.1")
+            .https_only(true)
+            .build()?;
         Ok(Self { client, token })
-    }
-
-    fn build_request(&self, method: Method, uri: &str) -> Request<Body> {
-        Request::builder()
-            .method(method)
-            .uri(uri)
-            .header("Authorization", format!("token {}", self.token))
-            .header("User-Agent", "ygg/0.1")
-            .header("Accept", "application/vnd.github.v3+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .body(Body::empty())
-            .unwrap()
-    }
-
-    async fn request(&self, req: Request<Body>) -> Result<hyper::Response<Body>> {
-        self.client.request(req).await.map_err(Into::into)
     }
 
     async fn fetch_raw_file(&self, uri: &str, cache_manager: &CacheManager) -> Result<Vec<u8>> {
@@ -145,21 +129,17 @@ impl CacheManager {
             }
         }
 
-        let mut request_builder = Request::builder()
-            .method(Method::GET)
-            .uri(uri)
-            .header("Authorization", format!("token {}", gh_client.token))
-            .header("User-Agent", "ygg/0.1")
-            .header("Accept", "application/vnd.github.v3.raw")
-            .header("X-GitHub-Api-Version", "2022-11-28");
+        let mut request_builder = gh_client.client.get(uri);
+        request_builder = request_builder.header("Authorization", format!("token {}", gh_client.token));
+        request_builder = request_builder.header("User-Agent", "ygg/0.1");
+        request_builder = request_builder.header("Accept", "application/vnd.github.v3.raw");
+        request_builder = request_builder.header("X-GitHub-Api-Version", "2022-11-28");
 
         if let Some(e) = etag {
             request_builder = request_builder.header("If-None-Match", e);
         }
 
-        let request = request_builder.body(Body::empty()).unwrap();
-
-        let res = gh_client.client.request(request).await?;
+        let res = request_builder.send().await?;
 
         let status = res.status();
 
@@ -170,7 +150,7 @@ impl CacheManager {
             // Get new body and etag
             let new_etag = res.headers().get("ETag").and_then(|v| v.to_str().ok()).map(|s| s.to_string());
 
-            let bytes = body::to_bytes(res.into_body()).await?;
+            let bytes = res.bytes().await?.to_vec();
 
             // Update cache
             let _ = fs::remove_file(&notfound_path);
@@ -179,7 +159,7 @@ impl CacheManager {
                 let _ = fs::write(&etag_path, e);
             }
 
-            bytes.to_vec()
+            bytes
         } else if status == StatusCode::NOT_FOUND {
             let _ = fs::remove_file(&cache_path);
             let _ = fs::remove_file(&etag_path);
@@ -247,9 +227,13 @@ async fn search_repos(gh_client: &GitHubClient, query: &str, org: &str) -> Resul
     let mut unique_repos: HashSet<String> = HashSet::new();
 
     loop {
-        let req = gh_client.build_request(Method::GET, &current_url);
+        let mut req_builder = gh_client.client.request(Method::GET, &current_url);
+        req_builder = req_builder.header("Authorization", format!("token {}", gh_client.token));
+        req_builder = req_builder.header("User-Agent", "ygg/0.1");
+        req_builder = req_builder.header("Accept", "application/vnd.github.v3+json");
+        req_builder = req_builder.header("X-GitHub-Api-Version", "2022-11-28");
 
-        let resp = gh_client.request(req).await?;
+        let resp = req_builder.send().await?;
 
         if !resp.status().is_success() {
             return Err(YggError::ApiError(format!("API error: {}", resp.status())));
@@ -274,9 +258,7 @@ async fn search_repos(gh_client: &GitHubClient, query: &str, org: &str) -> Resul
         }
 
         // Now consume the response to get the body
-        let body_bytes = body::to_bytes(resp.into_body()).await?;
-        let body = str::from_utf8(&body_bytes)?;
-        let api_resp: ApiResponse = serde_json::from_str(body)?;
+        let api_resp: ApiResponse = resp.json().await?;
 
         for item in api_resp.items {
             unique_repos.insert(item.repository.full_name);
@@ -304,9 +286,9 @@ fn load_or_prompt_org() -> Result<String> {
         return Ok(config.org);
     }
 
-    // No config: Prompt if interactive (stdin is a tty)
+    // No config: Prompt if interactive (stdin is a terminal)
     let mut org = String::new();
-    if atty::is(atty::Stream::Stdin) {
+    if std::io::stdin().is_terminal() {
         print!("Enter default GitHub organization (or leave empty to skip): ");
         io::stdout().flush().ok();
         let stdin = io::stdin();
